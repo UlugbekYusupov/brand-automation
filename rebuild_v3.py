@@ -82,6 +82,12 @@ if (session.step === undefined || session.step === null) {
   staticData[chatId] = session;
 }
 
+// /start always works — clear any session and show welcome
+if (ml === '/start') {
+  delete staticData[chatId];
+  return [{ json: { ...body, chatId, messageText, callbackQueryId, currentStep: 'start', session } }];
+}
+
 // step=0: session just ended (approved/cancelled)
 // Absorb this message, clear state — NEXT message is a clean new session
 if (session.step === 0) {
@@ -348,6 +354,13 @@ const chatId = $input.first().json.chatId;
 return [{ json: { chat_id: chatId, text: "No active session.\\n\\nSend a content idea to start." } }];
 """
 
+SEND_WELCOME_BODY = (
+    '={{ JSON.stringify({'
+    '"chat_id": $json.chatId,'
+    r'"text": "👋 Welcome to Personal Brand Bot!\n\nHere\u2019s how it works:\n\n1\ufe0f\u20e3 Send me a content idea\n\u2192 I generate an Instagram caption\n\n2\ufe0f\u20e3 Approve or redo the caption\n\u2192 Tap \u2705 Approve, \u270f\ufe0f Redo, or \u274c Cancel\n\n3\ufe0f\u20e3 Describe your image\n\u2192 I generate a custom image with AI\n\n4\ufe0f\u20e3 Approve or refine the image\n\u2192 Approve, regenerate, enhance quality, or write a new description\n\n5\ufe0f\u20e3 Done \u2014 your content is ready.\n\nReady? Send me your first content idea \ud83d\ude80"'
+    '}) }}'
+)
+
 REMIND_CAPTION_BODY = (
     '={{ JSON.stringify({'
     '"chat_id": $json.chatId,'
@@ -451,8 +464,12 @@ nodes = [
     code_node("n-build-no-session", "Build No Session Payload", [760, 300], BUILD_NO_SESSION_PAYLOAD_JS),
     http_node("n-no-session", "No Active Session", [980, 300], "POST", TG_MSG_URL, CT, TG_RAW_BODY),
 
+    # /start command — always shows welcome regardless of session state
+    if_node("n-is-start", "Is Start", [760, 550], "currentStep", "start"),
+    http_node("n-welcome", "Send Welcome", [980, 500], "POST", TG_MSG_URL, CT, SEND_WELCOME_BODY),
+
     # Routes on currentStep (outputs 0-3 only — switch limit)
-    switch_node("n-route", "Route by Step", [760, 450], "currentStep", [1, 2, 3, 4]),
+    switch_node("n-route", "Route by Step", [760, 680], "currentStep", [1, 2, 3, 4]),
 
     # ── Step 1: new idea → generate caption ───────────────────────
     http_node("n-claude",   "Call Claude",   [980, 150], "POST", ANT_URL, ANT_HDR, CLAUDE_BODY),
@@ -510,12 +527,18 @@ connections = {
     "Get Session State": {"main": [lnk("Build Callback Payload") + lnk("Is Noop")]},
     "Build Callback Payload": {"main": [lnk("Answer Callback")]},
 
-    # Is Noop: true → No Active Session | false → Route by Step
+    # Is Noop: true → No Active Session | false → Is Start
     "Is Noop": {"main": [
         lnk("Build No Session Payload"),  # output 0 (true)
-        lnk("Route by Step"),             # output 1 (false)
+        lnk("Is Start"),                  # output 1 (false)
     ]},
     "Build No Session Payload": {"main": [lnk("No Active Session")]},
+
+    # Is Start: true → Send Welcome | false → Route by Step
+    "Is Start": {"main": [
+        lnk("Send Welcome"),   # output 0 (true)
+        lnk("Route by Step"),  # output 1 (false)
+    ]},
 
     # Route by Step: outputs 0-3 only (switch limit)
     "Route by Step": {"main": [

@@ -2,8 +2,3 @@
 __pycache__/
 *.pyc
 .DS_Store
-activate.py
-create_workflow.py
-rebuild_conversational.py
-rebuild_v2.py
-update_split_message.py
